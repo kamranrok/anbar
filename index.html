@@ -42,6 +42,7 @@ td input{width:80px;padding:5px 8px}
 .drop p{color:var(--mut)}
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1e2340;color:#fff;padding:12px 22px;border-radius:12px;z-index:9}
 .err{color:var(--bad);font-size:13px}
+.fg{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}.fg label{display:grid;gap:4px;font-size:13px;color:var(--mut)}.call{color:var(--info);font-weight:700;text-decoration:none;direction:ltr;display:inline-block}
 </style>
 </head>
 <body>
@@ -75,6 +76,7 @@ td input{width:80px;padding:5px 8px}
         <select id="f" onchange="renderStock()">
           <option value="all">همه کالاها</option><option value="low">فقط کم‌موجود</option><option value="zero">فقط تمام‌شده</option>
         </select>
+        <button id="addbtn" class="hide" onclick="openItem(-1)">➕ کالای جدید</button>
       </div>
       <div class="tw"><table><thead><tr><th>کد</th><th>عنوان</th><th>واحد</th><th>کل ورودی</th><th>کل خروجی</th><th>موجودی</th><th>حد هشدار</th><th>وضعیت</th></tr></thead><tbody id="rows"></tbody></table></div>
     </section>
@@ -82,6 +84,8 @@ td input{width:80px;padding:5px 8px}
     <section id="hist" class="hide">
       <div class="tw"><table><thead><tr><th>تاریخ</th><th>کد</th><th>عنوان</th><th>رسید (+)</th><th>کسر (−)</th><th>موجودی جدید</th><th>منبع</th><th>کاربر</th></tr></thead><tbody id="hrows"></tbody></table></div>
     </section>
+
+    <section id="item" class="hide"><p><button class="sec" onclick="tab('stock')">← بازگشت به لیست</button></p><div id="itemBox"></div></section>
 
     <section id="imp" class="hide">
       <div class="drop">
@@ -103,7 +107,8 @@ const SUPABASE_KEY = "sb_publishable_vpfw_BcZiITj011wU8zCxA_ja4iNTA0";
 // ================================================================================
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const DOMAIN = "@anbar.app";
-let items = [], user = "", pending = [];
+let items = [], user = "", pending = [], isAdmin = false, cur = null;
+const ADMIN = "co.ajgostar@gmail.com";
 
 const $ = id => document.getElementById(id);
 const fa = s => String(s ?? "").replace(/ك/g,"ک").replace(/ي/g,"ی").trim();
@@ -123,13 +128,13 @@ async function logout(){await sb.auth.signOut();location.reload()}
 async function start(){
   const {data}=await sb.auth.getSession();
   if(!data.session)return;
-  user=data.session.user.email.replace(DOMAIN,"");
-  $("who").textContent=user;
+  user=data.session.user.email.replace(DOMAIN,"");isAdmin=data.session.user.email.toLowerCase()==ADMIN;
+  $("who").textContent=user+(isAdmin?" (مدیر)":"");$("addbtn").classList.toggle("hide",!isAdmin);
   $("login").classList.add("hide");$("app").classList.remove("hide");
   await loadItems();
 }
 function tab(t){
-  ["stock","hist","imp"].forEach(x=>{$(x).classList.toggle("hide",x!=t);$("t-"+x).classList.toggle("on",x==t)});
+  ["stock","hist","imp","item"].forEach(x=>{$(x).classList.toggle("hide",x!=t);const b=$("t-"+x);if(b)b.classList.toggle("on",x==t)});
   if(t=="hist")loadHist();
 }
 
@@ -148,11 +153,11 @@ function renderStock(){
   const q=fa($("q").value).toLowerCase(),f=$("f").value;
   const list=items.filter(i=>(f=="all"||(f=="zero"?status(i)=="zero":status(i)=="low"||(f=="low"&&0)))&&(!q||(i.title+i.code).toLowerCase().includes(q)));
   const tags={ok:["#16a870","موجود"],low:["#f59e0b","کم‌موجود"],zero:["#ef4444","تمام شد"]};
-  $("rows").innerHTML=list.map(i=>{const s=status(i);return `<tr>
+  $("rows").innerHTML=list.map(i=>{const s=status(i);return `<tr style="cursor:pointer" onclick="openItem(${items.indexOf(i)})">
     <td dir="ltr" style="text-align:right">${esc(i.code)}</td><td><b>${esc(i.title)}</b><div style="color:var(--mut);font-size:12px">${esc(i.spec)}</div></td>
     <td>${esc(i.unit)}</td><td class="in">${fmt(i.total_in)}</td><td class="out">${fmt(i.total_out)}</td>
     <td><b style="font-size:16px">${fmt(i.qty)}</b></td>
-    <td><input type="number" min="0" value="${i.min_qty||0}" onchange="setMin('${esc(i.code).replace(/'/g,"\\'")}',this.value)"></td>
+    <td onclick="event.stopPropagation()">${isAdmin?`<input type="number" min="0" value="${i.min_qty||0}" onchange="setMin('${esc(i.code).replace(/'/g,"\\'")}',this.value)">`:fmt(i.min_qty||0)}</td>
     <td><span class="tag" style="background:${tags[s][0]}">${tags[s][1]}</span></td></tr>`}).join("")||`<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--mut)">موردی یافت نشد</td></tr>`;
 }
 async function setMin(code,v){
@@ -164,7 +169,7 @@ async function setMin(code,v){
 async function loadHist(){
   const {data}=await sb.from("movements").select("*").order("id",{ascending:false}).limit(300);
   $("hrows").innerHTML=(data||[]).map(m=>`<tr><td>${new Date(m.created_at).toLocaleString("fa-IR")}</td><td dir="ltr" style="text-align:right">${esc(m.code)}</td><td>${esc(m.title)}</td>
-   <td class="in">${m.in_qty?"+"+fmt(m.in_qty):"—"}</td><td class="out">${m.out_qty?"−"+fmt(m.out_qty):"—"}</td><td><b>${fmt(m.qty_after)}</b> ${esc(m.unit)}</td><td>${m.kind=="init"?"اولین ورود":"اکسل"}</td><td>${esc(m.user_name)}</td></tr>`).join("")
+   <td class="in">${m.in_qty?"+"+fmt(m.in_qty):"—"}</td><td class="out">${m.out_qty?"−"+fmt(m.out_qty):"—"}</td><td><b>${fmt(m.qty_after)}</b> ${esc(m.unit)}</td><td>${({init:"اولین ورود",manual:"ویرایش دستی"})[m.kind]||"اکسل"}</td><td>${esc(m.user_name)}</td></tr>`).join("")
    ||`<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--mut)">تاریخچه‌ای ثبت نشده</td></tr>`;
 }
 
@@ -200,16 +205,127 @@ function readFile(file){
 }
 
 async function applyImport(){
-  const now=new Date().toISOString();
-  const up=pending.map(p=>({...p.n,min_qty:p.o?p.o.min_qty:0,updated_at:now}));
-  const mv=pending.map(p=>({code:p.n.code,title:p.n.title,unit:p.n.unit,in_qty:p.in_q,out_qty:p.out_q,qty_after:p.n.qty,kind:p.isNew?"init":"excel",user_name:user}));
-  for(let i=0;i<up.length;i+=200){
-    const a=await sb.from("items").upsert(up.slice(i,i+200));
-    const b=await sb.from("movements").insert(mv.slice(i,i+200));
-    if(a.error||b.error){toast("خطا در ذخیره اطلاعات");return}
+  const rows=pending.map(p=>({...p.n,in_q:p.in_q,out_q:p.out_q,is_new:!!p.isNew}));
+  for(let i=0;i<rows.length;i+=200){
+    const {error}=await sb.rpc("import_items",{rows:rows.slice(i,i+200)});
+    if(error){toast("خطا: "+error.message);return}
   }
   pending=[];$("preview").innerHTML="";$("file").value="";
   await loadItems();tab("stock");toast("موجودی انبار به‌روزرسانی شد ✔");
+}
+
+// ===== صفحه کالا =====
+async function openItem(idx){
+  cur=idx>=0?items[idx]:null;tab("item");
+  const i=cur||{code:"",title:"",spec:"",unit:"",qty:0,min_qty:0},ro=isAdmin?"":"disabled";
+  let h=`<div class="tw" style="padding:20px;margin-bottom:16px"><h3 style="margin-top:0">${cur?esc(i.title):"کالای جدید"}</h3><div class="fg">
+   <label>کد کالا<input id="f_code" ${cur?"disabled":ro} value="${esc(i.code)}"></label>
+   <label>عنوان<input id="f_title" ${ro} value="${esc(i.title)}"></label>
+   <label>مشخصات<input id="f_spec" ${ro} value="${esc(i.spec)}"></label>
+   <label>واحد<input id="f_unit" ${ro} value="${esc(i.unit)}"></label>
+   <label>موجودی<input id="f_qty" type="number" step="any" ${ro} value="${i.qty}"></label>
+   <label>حد هشدار<input id="f_min" type="number" step="any" ${ro} value="${i.min_qty||0}"></label></div>
+   ${isAdmin?`<p><button onclick="saveItem()">💾 ذخیره</button> ${cur?`<button style="background:var(--bad)" onclick="delItem()">🗑 حذف کالا</button>`:""}</p>`:""}</div>`;
+  if(cur)h+=`<div id="pur"></div><h3>تاریخچه ورود و خروج این کالا</h3><div class="tw"><table><thead><tr><th>تاریخ</th><th>رسید</th><th>کسر</th><th>موجودی</th><th>منبع</th><th>کاربر</th></tr></thead><tbody id="ihist"></tbody></table></div>`;
+  $("itemBox").innerHTML=h;
+  if(cur){loadItemHist();if(isAdmin)loadPurchases()}
+}
+async function saveItem(){
+  const code=fa($("f_code").value),title=fa($("f_title").value);
+  if(!code||!title)return toast("کد و عنوان الزامی است");
+  if(!cur&&items.some(x=>x.code==code))return toast("این کد قبلاً ثبت شده است");
+  const qty=num($("f_qty").value),old=cur?cur.qty:0;
+  const row={code,title,spec:fa($("f_spec").value),unit:fa($("f_unit").value),qty,min_qty:num($("f_min").value),updated_at:new Date().toISOString()};
+  const {error}=cur?await sb.from("items").update(row).eq("code",code):await sb.from("items").insert(row);
+  if(error)return toast("ذخیره نشد: "+error.message);
+  if(qty!=old)await sb.from("movements").insert({code,title,unit:row.unit,in_qty:qty>old?qty-old:0,out_qty:qty<old?old-qty:0,qty_after:qty,kind:cur?"manual":"init",user_name:user});
+  await loadItems();tab("stock");toast("ذخیره شد ✔");
+}
+async function delItem(){
+  if(!confirm("این کالا و خریدهای ثبت‌شده‌اش حذف شود؟"))return;
+  await sb.from("purchases").delete().eq("code",cur.code);await sb.from("sellers").delete().eq("code",cur.code);
+  const {error}=await sb.from("items").delete().eq("code",cur.code);
+  if(error)return toast("حذف نشد");
+  await loadItems();tab("stock");toast("کالا حذف شد");
+}
+async function loadItemHist(){
+  const {data}=await sb.from("movements").select("*").eq("code",cur.code).order("id",{ascending:false}).limit(100);
+  $("ihist").innerHTML=(data||[]).map(m=>`<tr><td>${new Date(m.created_at).toLocaleString("fa-IR")}</td><td class="in">${m.in_qty?"+"+fmt(m.in_qty):"—"}</td><td class="out">${m.out_qty?"−"+fmt(m.out_qty):"—"}</td><td><b>${fmt(m.qty_after)}</b></td><td>${({init:"اولین ورود",manual:"ویرایش دستی"})[m.kind]||"اکسل"}</td><td>${esc(m.user_name)}</td></tr>`).join("")||`<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--mut)">سابقه‌ای نیست</td></tr>`;
+}
+const JM=["فروردین","اردیبهشت","خرداد","تیر","مرداد","شهریور","مهر","آبان","آذر","دی","بهمن","اسفند"];
+function j2g(jy,jm,jd){
+  jy+=1595;let days=-355668+(365*jy)+(~~(jy/33))*8+~~(((jy%33)+3)/4)+jd+((jm<7)?(jm-1)*31:((jm-7)*30)+186);
+  let gy=400*~~(days/146097);days%=146097;
+  if(days>36524){gy+=100*~~(--days/36524);days%=36524;if(days>=365)days++}
+  gy+=4*~~(days/1461);days%=1461;
+  if(days>365){gy+=~~((days-1)/365);days=(days-1)%365}
+  let gd=days+1;const sal=[0,31,((gy%4==0&&gy%100!=0)||(gy%400==0))?29:28,31,30,31,30,31,31,30,31,30,31];
+  let gm;for(gm=0;gm<13&&gd>sal[gm];gm++)gd-=sal[gm];
+  return [gy,gm,gd];
+}
+function g2j(gy,gm,gd){
+  const gdm=[0,31,59,90,120,151,181,212,243,273,304,334];let gy2=(gm>2)?(gy+1):gy;
+  let days=355666+(365*gy)+~~((gy2+3)/4)-~~((gy2+99)/100)+~~((gy2+399)/400)+gd+gdm[gm-1];
+  let jy=-1595+(33*~~(days/12053));days%=12053;jy+=4*~~(days/1461);days%=1461;
+  if(days>365){jy+=~~((days-1)/365);days=(days-1)%365}
+  const jm=(days<186)?1+~~(days/31):7+~~((days-186)/30),jd=1+((days<186)?(days%31):((days-186)%30));
+  return [jy,jm,jd];
+}
+function jdate(id){
+  const t=new Date(),[jy,jm,jd]=g2j(t.getFullYear(),t.getMonth()+1,t.getDate());
+  const o=(x,y,sel,f)=>{let h="";for(let v=x;v<=y;v++)h+=`<option value="${v}" ${v==sel?"selected":""}>${f?f(v):v.toLocaleString("fa-IR",{useGrouping:false})}</option>`;return h};
+  $(id).innerHTML=`<select>${o(1,31,jd)}</select> <select>${o(1,12,jm,v=>JM[v-1])}</select> <select>${o(jy-6,jy+1,jy)}</select>`;
+}
+function jval(id){
+  let [d,m,y]=[...$(id).querySelectorAll("select")].map(x=>+x.value);
+  d=Math.min(d,m<=6?31:(m==12?29:30));const [gy,gm,gd]=j2g(y,m,d);
+  return `${gy}-${String(gm).padStart(2,"0")}-${String(gd).padStart(2,"0")}`;
+}
+const callLink=ph=>ph?`<a class="call" href="tel:${esc(ph.replace(/[^\d+]/g,""))}">📞 ${esc(ph)}</a>`:"—";
+async function loadPurchases(){
+  const [pr,sl]=await Promise.all([
+    sb.from("purchases").select("*").eq("code",cur.code).order("buy_date",{ascending:false}),
+    sb.from("sellers").select("*").eq("code",cur.code).order("id")]);
+  if(sl.error)toast("جدول فروشندگان ساخته نشده؛ update2.sql را اجرا کنید");
+  const data=pr.data||[],sellers=sl.data||[];cur._sellers=sellers;
+  const emp=t=>`<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--mut)">${t}</td></tr>`;
+  $("pur").innerHTML=`<h3>👥 فروشندگان این کالا</h3><div class="tw" style="padding:16px;margin-bottom:16px"><div class="fg">
+   <label>نام فروشنده<input id="s_name"></label>
+   <label>موبایل<input id="s_phone" dir="ltr" inputmode="tel" placeholder="09123456789"></label>
+   <label>توضیح<input id="s_note"></label></div>
+   <p><button onclick="addSeller()">➕ افزودن فروشنده</button></p>
+   <table><tbody>${sellers.map(x=>`<tr><td><b>${esc(x.name)}</b></td><td>${callLink(x.phone)}</td><td>${esc(x.note)}</td><td><button class="sec" onclick="delSeller(${x.id})">حذف</button></td></tr>`).join("")||emp("هنوز فروشنده‌ای ثبت نشده")}</tbody></table></div>
+   <h3>🛒 ثبت خرید <span style="font-size:12px;color:var(--mut);font-weight:400">(روی موجودی اثری ندارد)</span></h3><div class="tw" style="padding:16px;margin-bottom:12px"><div class="fg">
+   <div style="display:grid;gap:4px;font-size:13px;color:var(--mut)">تاریخ خرید<div id="p_date"></div></div>
+   <label>تعداد<input id="p_qty" type="number" step="any"></label>
+   <label>قیمت واحد<input id="p_price" type="number" step="any"></label>
+   <label>فروشنده<select id="p_sel" onchange="$('p_other').classList.toggle('hide',this.value!=='')">${sellers.map((x,i)=>`<option value="${i}">${esc(x.name)}</option>`).join("")}<option value="">فروشنده دیگر…</option></select></label>
+   <label>توضیح<input id="p_note"></label>
+   <div id="p_other" class="fg ${sellers.length?"hide":""}" style="grid-column:1/-1"><label>نام فروشنده<input id="p_name"></label><label>موبایل<input id="p_phone" dir="ltr" inputmode="tel"></label></div></div>
+   <p><button onclick="addPurchase()">➕ ثبت خرید</button></p></div>
+   <div class="tw"><table><thead><tr><th>تاریخ</th><th>تعداد</th><th>قیمت واحد</th><th>جمع</th><th>فروشنده</th><th>تماس</th><th>توضیح</th><th></th></tr></thead><tbody>${data.map(r=>`<tr><td>${r.buy_date?new Date(r.buy_date).toLocaleDateString("fa-IR-u-ca-persian"):"—"}</td><td>${fmt(r.qty||0)}</td><td>${fmt(r.price||0)}</td><td><b>${fmt((r.qty||0)*(r.price||0))}</b></td><td>${esc(r.seller_name)}</td><td>${callLink(r.seller_phone)}</td><td>${esc(r.note)}</td><td><button class="sec" onclick="delPurchase(${r.id})">حذف</button></td></tr>`).join("")||emp("خریدی ثبت نشده")}</tbody></table></div>`;
+  jdate("p_date");
+}
+async function addSeller(){
+  const name=$("s_name").value.trim();if(!name)return toast("نام فروشنده را بنویسید");
+  const {error}=await sb.from("sellers").insert({code:cur.code,name,phone:$("s_phone").value.trim(),note:$("s_note").value.trim()});
+  if(error)return toast("ثبت نشد: "+error.message);
+  toast("فروشنده اضافه شد ✔");loadPurchases();
+}
+async function delSeller(id){
+  if(!confirm("این فروشنده حذف شود؟"))return;
+  await sb.from("sellers").delete().eq("id",id);loadPurchases();
+}
+async function addPurchase(){
+  const sv=$("p_sel").value;let name,phone;
+  if(sv!==""){const x=cur._sellers[+sv];name=x.name;phone=x.phone}else{name=$("p_name").value.trim();phone=$("p_phone").value.trim()}
+  const {error}=await sb.from("purchases").insert({code:cur.code,buy_date:jval("p_date"),qty:num($("p_qty").value),price:num($("p_price").value),seller_name:name,seller_phone:phone,note:$("p_note").value.trim(),created_by:user});
+  if(error)return toast("ثبت نشد: "+error.message);
+  toast("خرید ثبت شد ✔");loadPurchases();
+}
+async function delPurchase(id){
+  if(!confirm("این ردیف حذف شود؟"))return;
+  await sb.from("purchases").delete().eq("id",id);loadPurchases();
 }
 
 sb.auth.getSession().then(({data})=>{if(data.session)start()});
