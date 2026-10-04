@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>مدیریت انبار</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#5b5bf0">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="انبار">
 <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -49,6 +56,37 @@ th{z-index:2}
 .trk{flex:1;min-width:80px;height:14px;border-radius:7px;background:#e6e9f5;overflow:hidden;box-shadow:inset 0 1px 3px #0002}
 .fl{height:100%;border-radius:7px;transition:width .6s;background-image:repeating-linear-gradient(135deg,#ffffff40 0 6px,#ffffff00 6px 12px)}
 .mt span{font-size:12px;font-weight:600;white-space:nowrap;min-width:52px}
+.u{display:none}
+html{-webkit-text-size-adjust:100%}
+@media(max-width:640px){
+  body{font-size:13px}
+  header{padding:10px 14px}header h2{font-size:16px}header button{padding:5px 10px;font-size:12px}
+  nav{padding:10px 10px 0;gap:6px;overflow-x:auto;flex-wrap:nowrap}
+  nav button{white-space:nowrap;padding:7px 12px;font-size:12px}
+  main{padding:10px 10px 30px}
+  .stats{grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .st{padding:8px 12px;border-right-width:5px;border-radius:12px}
+  .st b{font-size:20px}.st span{font-size:11px}
+  .alarm{padding:8px 12px;font-size:12px;margin-bottom:10px}
+  .bar{gap:8px}.bar input{min-width:100%;padding:8px 10px}.bar select{flex:1;padding:8px}.bar button{padding:8px 12px;font-size:12px}
+  .fg{grid-template-columns:1fr 1fr;gap:8px}
+  .lbox{width:92%;padding:26px}
+  .tw table{font-size:12px}.tw th,.tw td{padding:7px 8px}
+  .stk{max-height:none;background:transparent;box-shadow:none;overflow:visible}
+  .stk table,.stk tbody{display:block}.stk thead{display:none}
+  .stk tr{display:grid;grid-template-columns:1fr auto auto;grid-template-areas:"t t q" "c i o" "m m m";gap:4px 10px;background:#fff;border-radius:12px;padding:10px 12px;margin-bottom:8px;box-shadow:0 2px 8px #0001}
+  .stk td{border:0;padding:0}
+  .stk td.c-title{grid-area:t;font-size:13px}
+  .stk td.c-qty{grid-area:q;text-align:left;white-space:nowrap}
+  .stk td.c-qty b{font-size:16px!important}.u{display:inline;color:var(--mut)}
+  .stk td.c-code{grid-area:c;color:var(--mut);font-size:11px}
+  .stk td.c-in{grid-area:i;font-size:11px}.stk td.c-in::before{content:"ورودی ";color:var(--mut);font-weight:400}
+  .stk td.c-out{grid-area:o;font-size:11px}.stk td.c-out::before{content:"خروجی ";color:var(--mut);font-weight:400}
+  .stk td.c-st{grid-area:m}.stk .mt{min-width:0}
+  .stk td.c-unit,.stk td.c-min{display:none}
+  .stk td[colspan]{grid-column:1/-1}
+  .drop{padding:20px}
+}
 </style>
 </head>
 <body>
@@ -67,7 +105,7 @@ th{z-index:2}
 
 <!-- اپ -->
 <div id="app" class="hide">
-  <header><h2>📦 مدیریت انبار</h2><div>👤 <span id="who"></span> <button onclick="logout()">خروج</button></div></header>
+  <header><h2>📦 مدیریت انبار</h2><div>👤 <span id="who"></span> <button id="instbtn" class="hide" onclick="installApp()">📲 نصب اپ</button> <button onclick="logout()">خروج</button></div></header>
   <nav>
     <button id="t-stock" class="on" onclick="tab('stock')">موجودی کالاها</button>
     <button id="t-hist" onclick="tab('hist')">تاریخچه ورود و خروج</button>
@@ -115,6 +153,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const DOMAIN = "@anbar.app";
 let items = [], user = "", pending = [], isAdmin = false, cur = null;
 const ADMIN = "co.ajgostar@gmail.com";
+const IMPORTERS = [ADMIN, "anbar.mayan@gmail.com", "anbar@anbar.app"];
 
 const $ = id => document.getElementById(id);
 const fa = s => String(s ?? "").replace(/ك/g,"ک").replace(/ي/g,"ی").trim();
@@ -134,7 +173,7 @@ async function logout(){await sb.auth.signOut();location.reload()}
 async function start(){
   const {data}=await sb.auth.getSession();
   if(!data.session)return;
-  user=data.session.user.email.replace(DOMAIN,"");isAdmin=data.session.user.email.toLowerCase()==ADMIN;
+  user=data.session.user.email.replace(DOMAIN,"");isAdmin=data.session.user.email.toLowerCase()==ADMIN;$("t-imp").classList.toggle("hide",!IMPORTERS.includes(data.session.user.email.toLowerCase()));
   $("who").textContent=user+(isAdmin?" (مدیر)":"");$("addbtn").classList.toggle("hide",!isAdmin);
   $("login").classList.add("hide");$("app").classList.remove("hide");
   await loadItems();
@@ -167,11 +206,11 @@ function renderStock(){
   const list=items.filter(i=>(f=="all"||(f=="zero"?status(i)=="zero":status(i)=="low"||(f=="low"&&0)))&&(!q||(i.title+i.code).toLowerCase().includes(q)));
   
   $("rows").innerHTML=list.map(i=>{const s=status(i);return `<tr style="cursor:pointer" onclick="openItem(${items.indexOf(i)})">
-    <td dir="ltr" style="text-align:right">${esc(i.code)}</td><td><b>${esc(i.title)}</b><div style="color:var(--mut);font-size:12px">${esc(i.spec)}</div></td>
-    <td>${esc(i.unit)}</td><td class="in">${fmt(i.total_in)}</td><td class="out">${fmt(i.total_out)}</td>
-    <td><b style="font-size:16px">${fmt(i.qty)}</b></td>
-    <td onclick="event.stopPropagation()">${isAdmin?`<input type="number" min="0" value="${i.min_qty||0}" onchange="setMin('${esc(i.code).replace(/'/g,"\\'")}',this.value)">`:fmt(i.min_qty||0)}</td>
-    <td>${meter(i)}</td></tr>`}).join("")||`<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--mut)">موردی یافت نشد</td></tr>`;
+    <td class="c-code" dir="ltr" style="text-align:right">${esc(i.code)}</td><td class="c-title"><b>${esc(i.title)}</b><div style="color:var(--mut);font-size:12px">${esc(i.spec)}</div></td>
+    <td class="c-unit">${esc(i.unit)}</td><td class="in c-in">${fmt(i.total_in)}</td><td class="out c-out">${fmt(i.total_out)}</td>
+    <td class="c-qty"><b style="font-size:16px">${fmt(i.qty)}</b><small class="u"> ${esc(i.unit)}</small></td>
+    <td class="c-min" onclick="event.stopPropagation()">${isAdmin?`<input type="number" min="0" value="${i.min_qty||0}" onchange="setMin('${esc(i.code).replace(/'/g,"\\'")}',this.value)">`:fmt(i.min_qty||0)}</td>
+    <td class="c-st">${meter(i)}</td></tr>`}).join("")||`<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--mut)">موردی یافت نشد</td></tr>`;
 }
 async function setMin(code,v){
   const {error}=await sb.from("items").update({min_qty:num(v)}).eq("code",code);
@@ -340,6 +379,12 @@ async function delPurchase(id){
   if(!confirm("این ردیف حذف شود؟"))return;
   await sb.from("purchases").delete().eq("id",id);loadPurchases();
 }
+
+let dp=null;
+window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();dp=e;$("instbtn").classList.remove("hide")});
+window.addEventListener("appinstalled",()=>$("instbtn").classList.add("hide"));
+async function installApp(){if(!dp)return;dp.prompt();await dp.userChoice;dp=null;$("instbtn").classList.add("hide")}
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
 
 sb.auth.getSession().then(({data})=>{if(data.session)start()});
 </script>
