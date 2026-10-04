@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مدیریت انبار</title>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#f1f4fb;--card:#fff;--tx:#1e2340;--mut:#7a809c;--pri:#5b5bf0;--ok:#16a870;--warn:#f59e0b;--bad:#ef4444;--info:#0ea5e9}
+*{box-sizing:border-box}
+body{margin:0;font-family:Vazirmatn,Tahoma,sans-serif;background:var(--bg);color:var(--tx)}
+button{font-family:inherit;cursor:pointer;border:0;border-radius:10px;padding:9px 16px;font-weight:600;color:#fff;background:var(--pri)}
+button.sec{background:#e5e8f6;color:var(--tx)}
+input,select{font-family:inherit;padding:9px 12px;border:1.5px solid #dde1f2;border-radius:10px;font-size:14px;background:#fff}
+.hide{display:none!important}
+#login{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#5b5bf0,#a855f7 55%,#ec4899)}
+.lbox{background:#fff;padding:36px;border-radius:22px;width:340px;box-shadow:0 20px 60px #0004;display:grid;gap:14px;text-align:center}
+.lbox h1{margin:0;font-size:24px}
+header{background:linear-gradient(90deg,#5b5bf0,#a855f7);color:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
+header h2{margin:0;font-size:20px}
+header button{background:#fff3;padding:7px 14px}
+nav{display:flex;gap:8px;padding:16px 24px 0}
+nav button{background:#fff;color:var(--mut);box-shadow:0 2px 8px #0001}
+nav button.on{background:var(--pri);color:#fff}
+main{padding:16px 24px 40px;max-width:1200px;margin:auto}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:16px}
+.st{background:var(--card);border-radius:16px;padding:16px 18px;border-right:6px solid var(--c);box-shadow:0 3px 12px #0001;cursor:pointer}
+.st b{display:block;font-size:28px;color:var(--c)}.st span{color:var(--mut);font-size:13px}
+.alarm{background:#fff1f1;border:1.5px solid #fecaca;color:#b91c1c;padding:12px 16px;border-radius:12px;margin-bottom:14px;font-weight:600}
+.bar{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}.bar input{flex:1;min-width:200px}
+.tw{background:var(--card);border-radius:16px;box-shadow:0 3px 12px #0001;overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{background:#eef0fb;padding:11px 12px;text-align:right;white-space:nowrap;position:sticky;top:0}
+td{padding:10px 12px;border-top:1px solid #eef0f8}
+tr:hover td{background:#fafbff}
+.tag{padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;color:#fff;white-space:nowrap}
+.in{color:var(--ok);font-weight:600}.out{color:var(--bad);font-weight:600}
+td input{width:80px;padding:5px 8px}
+.drop{background:var(--card);border:3px dashed #b9bff0;border-radius:20px;padding:40px;text-align:center;margin-bottom:16px}
+.drop p{color:var(--mut)}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1e2340;color:#fff;padding:12px 22px;border-radius:12px;z-index:9}
+.err{color:var(--bad);font-size:13px}
+</style>
+</head>
+<body>
+
+<!-- ورود -->
+<div id="login">
+  <div class="lbox">
+    <div style="font-size:46px">📦</div>
+    <h1>مدیریت انبار</h1>
+    <input id="u" placeholder="نام کاربری" autocomplete="username" dir="ltr">
+    <input id="p" type="password" placeholder="رمز عبور" autocomplete="current-password" dir="ltr" onkeydown="if(event.key=='Enter')doLogin()">
+    <button onclick="doLogin()">ورود</button>
+    <div id="lerr" class="err"></div>
+  </div>
+</div>
+
+<!-- اپ -->
+<div id="app" class="hide">
+  <header><h2>📦 مدیریت انبار</h2><div>👤 <span id="who"></span> <button onclick="logout()">خروج</button></div></header>
+  <nav>
+    <button id="t-stock" class="on" onclick="tab('stock')">موجودی کالاها</button>
+    <button id="t-hist" onclick="tab('hist')">تاریخچه ورود و خروج</button>
+    <button id="t-imp" onclick="tab('imp')">ایمپورت اکسل</button>
+  </nav>
+  <main>
+    <section id="stock">
+      <div class="stats" id="stats"></div>
+      <div id="alarm"></div>
+      <div class="bar">
+        <input id="q" placeholder="جستجوی نام یا کد کالا…" oninput="renderStock()">
+        <select id="f" onchange="renderStock()">
+          <option value="all">همه کالاها</option><option value="low">فقط کم‌موجود</option><option value="zero">فقط تمام‌شده</option>
+        </select>
+      </div>
+      <div class="tw"><table><thead><tr><th>کد</th><th>عنوان</th><th>واحد</th><th>کل ورودی</th><th>کل خروجی</th><th>موجودی</th><th>حد هشدار</th><th>وضعیت</th></tr></thead><tbody id="rows"></tbody></table></div>
+    </section>
+
+    <section id="hist" class="hide">
+      <div class="tw"><table><thead><tr><th>تاریخ</th><th>کد</th><th>عنوان</th><th>رسید (+)</th><th>کسر (−)</th><th>موجودی جدید</th><th>منبع</th><th>کاربر</th></tr></thead><tbody id="hrows"></tbody></table></div>
+    </section>
+
+    <section id="imp" class="hide">
+      <div class="drop">
+        <div style="font-size:42px">📥</div>
+        <h3>فایل اکسل برنامه حسابداری را انتخاب کنید</h3>
+        <p>ستون‌ها: کد کالا، عنوان کالا، مشخصات کالا، ورودی، خروجی، موجودی، واحد اصلی</p>
+        <input type="file" id="file" accept=".xlsx,.xls" onchange="readFile(this.files[0])">
+      </div>
+      <div id="preview"></div>
+    </section>
+  </main>
+</div>
+<div id="toast" class="hide"></div>
+
+<script>
+// ===== تنظیمات Supabase: این دو مقدار را از Project Settings > API کپی کنید =====
+const SUPABASE_URL = "https://phcdhmrrnzfolsvwcjiw.supabase.co";
+const SUPABASE_KEY = "sb_publishable_vpfw_BcZiITj011wU8zCxA_ja4iNTA0";
+// ================================================================================
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const DOMAIN = "@anbar.app";
+let items = [], user = "", pending = [];
+
+const $ = id => document.getElementById(id);
+const fa = s => String(s ?? "").replace(/ك/g,"ک").replace(/ي/g,"ی").trim();
+const num = v => { const n = parseFloat(String(v ?? 0).replace(/,/g,"")); return isNaN(n) ? 0 : n; };
+const fmt = n => (Math.round(n*1000)/1000).toLocaleString("fa-IR");
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function toast(m){const t=$("toast");t.textContent=m;t.classList.remove("hide");setTimeout(()=>t.classList.add("hide"),3500)}
+
+async function doLogin(){
+  $("lerr").textContent="";
+  let em=$("u").value.trim().toLowerCase();if(!em.includes("@"))em+=DOMAIN;
+  const {error}=await sb.auth.signInWithPassword({email:em,password:$("p").value});
+  if(error){$("lerr").textContent="نام کاربری یا رمز عبور اشتباه است";return}
+  start();
+}
+async function logout(){await sb.auth.signOut();location.reload()}
+async function start(){
+  const {data}=await sb.auth.getSession();
+  if(!data.session)return;
+  user=data.session.user.email.replace(DOMAIN,"");
+  $("who").textContent=user;
+  $("login").classList.add("hide");$("app").classList.remove("hide");
+  await loadItems();
+}
+function tab(t){
+  ["stock","hist","imp"].forEach(x=>{$(x).classList.toggle("hide",x!=t);$("t-"+x).classList.toggle("on",x==t)});
+  if(t=="hist")loadHist();
+}
+
+async function loadItems(){
+  const {data,error}=await sb.from("items").select("*").order("title").limit(5000);
+  if(error){toast("خطا در دریافت اطلاعات");return}
+  items=data;renderStock();
+}
+const status=i=>i.qty<=0?"zero":(i.min_qty>0&&i.qty<=i.min_qty?"low":"ok");
+
+function renderStock(){
+  const z=items.filter(i=>status(i)=="zero"),l=items.filter(i=>status(i)=="low");
+  $("stats").innerHTML=[["همه کالاها",items.length,"#5b5bf0","all"],["موجود و سالم",items.length-z.length-l.length,"#16a870","all"],["کم‌موجود",l.length,"#f59e0b","low"],["تمام‌شده",z.length,"#ef4444","zero"]]
+    .map(s=>`<div class="st" style="--c:${s[2]}" onclick="$('f').value='${s[3]}';renderStock()"><b>${fmt(s[1])}</b><span>${s[0]}</span></div>`).join("");
+  $("alarm").innerHTML=(z.length+l.length)?`<div class="alarm">🔔 هشدار: ${fmt(z.length)} کالا تمام شده و ${fmt(l.length)} کالا به حد هشدار رسیده است.</div>`:"";
+  const q=fa($("q").value).toLowerCase(),f=$("f").value;
+  const list=items.filter(i=>(f=="all"||(f=="zero"?status(i)=="zero":status(i)=="low"||(f=="low"&&0)))&&(!q||(i.title+i.code).toLowerCase().includes(q)));
+  const tags={ok:["#16a870","موجود"],low:["#f59e0b","کم‌موجود"],zero:["#ef4444","تمام شد"]};
+  $("rows").innerHTML=list.map(i=>{const s=status(i);return `<tr>
+    <td dir="ltr" style="text-align:right">${esc(i.code)}</td><td><b>${esc(i.title)}</b><div style="color:var(--mut);font-size:12px">${esc(i.spec)}</div></td>
+    <td>${esc(i.unit)}</td><td class="in">${fmt(i.total_in)}</td><td class="out">${fmt(i.total_out)}</td>
+    <td><b style="font-size:16px">${fmt(i.qty)}</b></td>
+    <td><input type="number" min="0" value="${i.min_qty||0}" onchange="setMin('${esc(i.code).replace(/'/g,"\\'")}',this.value)"></td>
+    <td><span class="tag" style="background:${tags[s][0]}">${tags[s][1]}</span></td></tr>`}).join("")||`<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--mut)">موردی یافت نشد</td></tr>`;
+}
+async function setMin(code,v){
+  const {error}=await sb.from("items").update({min_qty:num(v)}).eq("code",code);
+  if(error)return toast("ذخیره نشد");
+  items.find(i=>i.code==code).min_qty=num(v);renderStock();toast("حد هشدار ذخیره شد");
+}
+
+async function loadHist(){
+  const {data}=await sb.from("movements").select("*").order("id",{ascending:false}).limit(300);
+  $("hrows").innerHTML=(data||[]).map(m=>`<tr><td>${new Date(m.created_at).toLocaleString("fa-IR")}</td><td dir="ltr" style="text-align:right">${esc(m.code)}</td><td>${esc(m.title)}</td>
+   <td class="in">${m.in_qty?"+"+fmt(m.in_qty):"—"}</td><td class="out">${m.out_qty?"−"+fmt(m.out_qty):"—"}</td><td><b>${fmt(m.qty_after)}</b> ${esc(m.unit)}</td><td>${m.kind=="init"?"اولین ورود":"اکسل"}</td><td>${esc(m.user_name)}</td></tr>`).join("")
+   ||`<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--mut)">تاریخچه‌ای ثبت نشده</td></tr>`;
+}
+
+function readFile(file){
+  if(!file)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    const wb=XLSX.read(e.target.result,{type:"array"});
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:""});
+    const get=(row,name)=>{const k=Object.keys(row).find(k=>fa(k)==name);return k?row[k]:""};
+    const map=new Map(items.map(i=>[i.code,i]));
+    pending=[];let same=0;
+    rows.forEach(row=>{
+      const code=fa(get(row,"کد کالا"));if(!code)return;
+      const n={code,title:fa(get(row,"عنوان کالا")),spec:fa(get(row,"مشخصات کالا")),unit:fa(get(row,"واحد اصلی")),
+        total_in:Math.abs(num(get(row,"ورودی"))),total_out:Math.abs(num(get(row,"خروجی"))),qty:num(get(row,"موجودی"))};
+      const o=map.get(code);
+      if(!o){pending.push({n,in_q:n.qty>0?n.qty:0,out_q:0,isNew:true});return}
+      let di=Math.max(n.total_in-o.total_in,0),dout=Math.max(n.total_out-o.total_out,0);
+      const dq=n.qty-o.qty;
+      if(!di&&!dout&&dq){dq>0?di=dq:dout=-dq}
+      if(di||dout||dq)pending.push({n,in_q:di,out_q:dout,o});else same++;
+    });
+    $("preview").innerHTML=`<div class="stats">
+      <div class="st" style="--c:#5b5bf0"><b>${fmt(rows.length)}</b><span>ردیف در فایل</span></div>
+      <div class="st" style="--c:#0ea5e9"><b>${fmt(pending.filter(p=>p.isNew).length)}</b><span>کالای جدید</span></div>
+      <div class="st" style="--c:#f59e0b"><b>${fmt(pending.filter(p=>!p.isNew).length)}</b><span>کالای تغییرکرده</span></div>
+      <div class="st" style="--c:#7a809c"><b>${fmt(same)}</b><span>بدون تغییر</span></div></div>
+      ${pending.length?`<div class="tw"><table><thead><tr><th>کد</th><th>عنوان</th><th>رسید</th><th>کسر</th><th>موجودی قبلی</th><th>موجودی جدید</th></tr></thead><tbody>${pending.map(p=>`<tr><td dir="ltr" style="text-align:right">${esc(p.n.code)}</td><td>${esc(p.n.title)} ${p.isNew?'<span class="tag" style="background:#0ea5e9">جدید</span>':''}</td><td class="in">${p.in_q?"+"+fmt(p.in_q):"—"}</td><td class="out">${p.out_q?"−"+fmt(p.out_q):"—"}</td><td>${p.o?fmt(p.o.qty):"—"}</td><td><b>${fmt(p.n.qty)}</b> ${esc(p.n.unit)}</td></tr>`).join("")}</tbody></table></div>
+      <p><button onclick="applyImport()">✅ تایید و اعمال تغییرات</button></p>`:`<p>تغییری نسبت به موجودی فعلی وجود ندارد.</p>`}`;
+  };
+  r.readAsArrayBuffer(file);
+}
+
+async function applyImport(){
+  const now=new Date().toISOString();
+  const up=pending.map(p=>({...p.n,min_qty:p.o?p.o.min_qty:0,updated_at:now}));
+  const mv=pending.map(p=>({code:p.n.code,title:p.n.title,unit:p.n.unit,in_qty:p.in_q,out_qty:p.out_q,qty_after:p.n.qty,kind:p.isNew?"init":"excel",user_name:user}));
+  for(let i=0;i<up.length;i+=200){
+    const a=await sb.from("items").upsert(up.slice(i,i+200));
+    const b=await sb.from("movements").insert(mv.slice(i,i+200));
+    if(a.error||b.error){toast("خطا در ذخیره اطلاعات");return}
+  }
+  pending=[];$("preview").innerHTML="";$("file").value="";
+  await loadItems();tab("stock");toast("موجودی انبار به‌روزرسانی شد ✔");
+}
+
+sb.auth.getSession().then(({data})=>{if(data.session)start()});
+</script>
+</body>
+</html>
