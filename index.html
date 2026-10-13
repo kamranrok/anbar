@@ -118,7 +118,7 @@ html{-webkit-text-size-adjust:100%}
       <div class="bar">
         <input id="q" placeholder="جستجوی نام یا کد کالا…" oninput="renderStock()">
         <select id="f" onchange="renderStock()">
-          <option value="all">همه کالاها</option><option value="low">فقط کم‌موجود</option><option value="zero">فقط تمام‌شده</option>
+          <option value="all">همه کالاها</option><option value="low">فقط زیر حد هشدار</option><option value="zero">فقط تمام‌شده</option>
         </select>
         <button id="addbtn" class="hide" onclick="openItem(-1)">➕ کالای جدید</button>
       </div>
@@ -188,22 +188,28 @@ async function loadItems(){
   if(error){toast("خطا در دریافت اطلاعات");return}
   items=data;renderStock();
 }
-const status=i=>i.qty<=0?"zero":(i.min_qty>0&&i.qty<=i.min_qty?"low":"ok");
+const status=i=>i.qty<=0?"zero":(i.min_qty>0&&i.qty<=i.min_qty?"danger":(i.min_qty>0&&i.qty<=i.min_qty*1.5?"near":"ok"));
 
 function meter(i){
   const ref=i.min_qty>0?i.min_qty*3:(i.total_in>0?i.total_in:Math.max(i.qty,1));
   const r=Math.max(0,Math.min(1,i.qty/ref)),pc=Math.round(r*100),s=status(i);
-  const c=s=="zero"||r<0.2?"#ef4444":r<0.5?"#f59e0b":"#16a870";
-  const t=s=="zero"?"تمام شد":s=="low"?"کم‌موجود":"موجود";
-  return `<div class="mt" title="${pc.toLocaleString("fa-IR")}٪ باقی‌مانده"><div class="trk"><div class="fl" style="width:${pc}%;background-color:${c}"></div></div><span style="color:${c}">${t}</span></div>`;
+  let c,t;
+  if(s=="zero"){c="#991b1b";t="تمام شد"}
+  else if(s=="danger"){c="#ef4444";t="⚠ زیر حد هشدار"}
+  else if(s=="near"){c="#f59e0b";t="نزدیک حد هشدار"}
+  else if(i.min_qty>0){c="#16a870";t="موجود"}
+  else if(r<0.2){c="#ef4444";t="کم‌موجود"}
+  else if(r<0.5){c="#f59e0b";t="رو به کم"}
+  else{c="#16a870";t="موجود"}
+  return `<div class="mt" title="${pc.toLocaleString("fa-IR")}٪ باقی‌مانده"><div class="trk"><div class="fl" style="width:${Math.max(pc,s=="ok"?0:4)}%;background-color:${c}"></div></div><span style="color:${c}">${t}</span></div>`;
 }
 function renderStock(){
-  const z=items.filter(i=>status(i)=="zero"),l=items.filter(i=>status(i)=="low");
-  $("stats").innerHTML=[["همه کالاها",items.length,"#5b5bf0","all"],["موجود و سالم",items.length-z.length-l.length,"#16a870","all"],["کم‌موجود",l.length,"#f59e0b","low"],["تمام‌شده",z.length,"#ef4444","zero"]]
+  const z=items.filter(i=>status(i)=="zero"),l=items.filter(i=>status(i)=="danger");
+  $("stats").innerHTML=[["همه کالاها",items.length,"#5b5bf0","all"],["موجود و سالم",items.length-z.length-l.length,"#16a870","all"],["⚠ زیر حد هشدار",l.length,"#ef4444","low"],["تمام‌شده",z.length,"#991b1b","zero"]]
     .map(s=>`<div class="st" style="--c:${s[2]}" onclick="$('f').value='${s[3]}';renderStock()"><b>${fmt(s[1])}</b><span>${s[0]}</span></div>`).join("");
-  $("alarm").innerHTML=(z.length+l.length)?`<div class="alarm">🔔 هشدار: ${fmt(z.length)} کالا تمام شده و ${fmt(l.length)} کالا به حد هشدار رسیده است.</div>`:"";
+  $("alarm").innerHTML=(z.length+l.length)?`<div class="alarm">🔔 هشدار: ${fmt(z.length)} کالا تمام شده و ${fmt(l.length)} کالا از حد هشدار گذشته و در وضعیت خطر است.</div>`:"";
   const q=fa($("q").value).toLowerCase(),f=$("f").value;
-  const list=items.filter(i=>(f=="all"||(f=="zero"?status(i)=="zero":status(i)=="low"||(f=="low"&&0)))&&(!q||(i.title+i.code).toLowerCase().includes(q)));
+  const list=items.filter(i=>(f=="all"||(f=="zero"&&status(i)=="zero")||(f=="low"&&status(i)=="danger"))&&(!q||(i.title+i.code).toLowerCase().includes(q)));
   
   $("rows").innerHTML=list.map(i=>{const s=status(i);return `<tr style="cursor:pointer" onclick="openItem(${items.indexOf(i)})">
     <td class="c-code" dir="ltr" style="text-align:right">${esc(i.code)}</td><td class="c-title"><b>${esc(i.title)}</b><div style="color:var(--mut);font-size:12px">${esc(i.spec)}</div></td>
